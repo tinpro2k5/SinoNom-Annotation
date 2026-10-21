@@ -1735,11 +1735,75 @@ root.addEventListener('click', event => {
 });
 
 window.addEventListener('keydown', event => {
-  if (event.key === 'Delete' || event.key === 'Backspace') {
-    const activeElem = document.activeElement;
-    if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA' || activeElem.isContentEditable)) {
+  const activeElem = document.activeElement;
+  if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA' || activeElem.tagName === 'SELECT' || activeElem.isContentEditable)) {
+    return;
+  }
+
+  const arrowKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+  if (arrowKeys.includes(event.key)) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+
+    const delta = event.shiftKey ? 10 : 1;
+    let dx = 0;
+    let dy = 0;
+    if (event.key === 'ArrowLeft') dx = -delta;
+    else if (event.key === 'ArrowRight') dx = delta;
+    else if (event.key === 'ArrowUp') dy = -delta;
+    else if (event.key === 'ArrowDown') dy = delta;
+
+    if (props.value.step === 3 && selectedIds.size > 0) {
+      const ids = [...selectedIds].filter(id => localBoxes[id]);
+      if (!ids.length) return;
+
+      const width = props.value.width;
+      const height = props.value.height;
+      const boxes = ids.map(id => localBoxes[id].bbox);
+      const minX = Math.min(...boxes.map(b => b[0]));
+      const maxX = Math.max(...boxes.map(b => b[2]));
+      const minY = Math.min(...boxes.map(b => b[1]));
+      const maxY = Math.max(...boxes.map(b => b[3]));
+
+      const clampedDx = Math.max(-minX, Math.min(dx, width - maxX));
+      const clampedDy = Math.max(-minY, Math.min(dy, height - maxY));
+
+      if (clampedDx === 0 && clampedDy === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const beforeIds = Object.keys(localBoxes);
+      ids.forEach(id => {
+        const b = localBoxes[id].bbox;
+        const newBox = [b[0] + clampedDx, b[1] + clampedDy, b[2] + clampedDx, b[3] + clampedDy];
+        drawLocalBox(id, newBox);
+      });
+      isDirty = true;
+      syncExternalControls();
+      renderSelection();
+      traceTransition('MOVE', beforeIds);
+      event.preventDefault();
       return;
     }
+
+    if (props.value.step === 6 && localBoxes.crop) {
+      const b = localBoxes.crop.bbox;
+      const width = props.value.width;
+      const height = props.value.height;
+      const bw = b[2] - b[0];
+      const bh = b[3] - b[1];
+      const newX1 = Math.max(0, Math.min(width - bw, b[0] + dx));
+      const newY1 = Math.max(0, Math.min(height - bh, b[1] + dy));
+      localBoxes.crop.bbox = [newX1, newY1, newX1 + bw, newY1 + bh];
+      drawPreview(groupFor('crop'), localBoxes.crop.bbox);
+      isDirty = true;
+      syncExternalControls();
+      event.preventDefault();
+      return;
+    }
+  }
+
+  if (event.key === 'Delete' || event.key === 'Backspace') {
     if (!selectedIds.size) return;
     const beforeIds = Object.keys(localBoxes);
     const deletedCount = selectedIds.size;
