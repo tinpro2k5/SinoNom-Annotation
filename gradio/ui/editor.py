@@ -7,8 +7,8 @@ from annotation.state import source_mismatch_confirmed, spatial_box_order
 from annotation.text_alignment import MISSING_ANNOTATION, count_annotation_characters
 from .icons import DOCUMENT
 
-SCRIPT = (Path(__file__).parent / 'assets/editor.js').read_text()
-CSS = (Path(__file__).parent / 'assets/editor.css').read_text()
+SCRIPT = (Path(__file__).parent / 'assets/editor.js').read_text(encoding='utf-8', errors='replace')
+CSS = (Path(__file__).parent / 'assets/editor.css').read_text(encoding='utf-8', errors='replace')
 
 
 def _review_point(point, crop, scale_x, scale_y):
@@ -124,7 +124,8 @@ def snapshot(s):
     board_class = ' status-order-board review-board' if step == 7 else ' status-order-board' if step == 4 else ''
     markup=f'''<div class="workbench-board{board_class}"><div class="workspace-toolbar">
         <div class="workspace-context"><span class="file-icon">{DOCUMENT}</span><strong>{filename}</strong><span class="dimensions">{dimensions}</span></div>
-        <div class="toolbar-tools"><span class="zoom-label" aria-live="polite">100%</span>
+        <div class="toolbar-tools"><button type="button" class="tool-btn-numbers active" data-toggle-numbers="1" title="Bật/Tắt số thứ tự (Toggle box numbers)"># 123</button>
+        <span class="zoom-label" aria-live="polite">100%</span>
         <button type="button" data-zoom="out" aria-label="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
         <button type="button" data-zoom="in" aria-label="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button></div></div>
         <div class="image-viewport"><svg class="annotation-canvas" viewBox="0 0 {canvas_w} {canvas_h}" role="img" aria-label="{filename} · {'cropped review' if step == 7 else 'annotation canvas'}" style="aspect-ratio:{canvas_w}/{canvas_h}">
@@ -166,8 +167,30 @@ def snapshot(s):
         if step == 3:
             public_id = s.get('box_id_by_region', {}).get(key)
             label = html.escape(public_id) if public_id else ''
+            label_markup = ''
+            if label:
+                num_x = x1 + 3 * unit
+                num_y = y1 + 3 * unit
+                num_size = max(9 * unit, min(bw, bh) * 0.22)
+                label_markup = f'<text data-box-order-label="1" fill="{stroke_color}" font-family="sans-serif" pointer-events="none" paint-order="stroke" stroke="#17191c" stroke-width="{stroke_width}"><tspan class="box-order-num" x="{num_x}" y="{num_y}" font-size="{num_size}" font-weight="700" text-anchor="start" dominant-baseline="hanging">{label}</tspan></text>'
         else:
-            label=html.escape(key+' '+s['annotations'].get(key,'')) if public_box else ''
+            char = s.get('annotations', {}).get(str(key), '')
+            label = html.escape(key + (' ' + char if char else '')) if public_box else ''
+            label_markup = ''
+            if public_box and (key or char):
+                num_x = x1 + 3 * unit
+                num_y = y1 + 3 * unit
+                num_size = max(9 * unit, min(bw, bh) * 0.22)
+                char_size = max(12 * unit, min(bw, bh) * 0.42)
+                max_w = canvas_w if step == 7 else draw_w
+                is_near_right = (x2 + char_size * 1.5) > max_w
+                char_x = x1 - 4 * unit if is_near_right else x2 + 4 * unit
+                char_anchor = 'end' if is_near_right else 'start'
+                char_y = (y1 + y2) / 2
+                escaped_key = html.escape(str(key))
+                escaped_char = html.escape(char)
+                char_tspan = f'<tspan class="box-char-label" x="{char_x}" y="{char_y}" font-size="{char_size}" text-anchor="{char_anchor}" dominant-baseline="central">{escaped_char}</tspan>' if char else ''
+                label_markup = f'<text data-box-order-label="1" fill="{text_color if reveal_status else stroke_color}" font-family="var(--han-nom-font, &quot;Vietnamica NomNaTong&quot;, &quot;Vietnamica DengXian&quot;, sans-serif)" pointer-events="none" paint-order="stroke" stroke="#17191c" stroke-width="{stroke_width}"><tspan class="box-order-num" x="{num_x}" y="{num_y}" font-size="{num_size}" font-weight="700" text-anchor="start" dominant-baseline="hanging">{escaped_key}</tspan>{char_tspan}</text>'
         dashed=''
         identity_attr = (f'data-box-id="{key}" data-region-uid="{key}"'
                          if step == 3 else f'data-box-id="{key}"')
@@ -184,7 +207,7 @@ def snapshot(s):
             <rect x="{x1}" y="{y1}" width="{x2-x1}" height="{y2-y1}" fill="{fill_color}" fill-opacity="{fill_opacity}" stroke="{stroke_color}" stroke-width="{'3' if suspicious and multi_selected else '2' if suspicious else '2.5' if multi_selected else '1.5'}" vector-effect="non-scaling-stroke"{missing_attr}{dashed}/>
             {f'<g data-miss-mark="1" stroke="#ef4444" stroke-width="2.25" stroke-linecap="round" pointer-events="none"><line x1="{miss_x1}" y1="{miss_y1}" x2="{miss_x2}" y2="{miss_y2}" vector-effect="non-scaling-stroke"/><line x1="{miss_x2}" y1="{miss_y1}" x2="{miss_x1}" y2="{miss_y2}" vector-effect="non-scaling-stroke"/></g>' if missing_annotation else ''}
             {f'<text data-unknown-mark="1" x="{(x1+x2)/2}" y="{(y1+y2)/2}" text-anchor="middle" dominant-baseline="central" fill="#ef4444" font-family="sans-serif" font-size="{min(bw,bh)*0.80}" font-weight="700" pointer-events="none">?</text>' if reveal_status and is_unknown and not missing_annotation else ''}
-            {f'<text data-box-order-label="1" x="{(x1+x2)/2}" y="{max(font_size, y1-3*unit)}" text-anchor="middle" fill="{text_color if reveal_status else stroke_color}" font-size="{font_size}" font-family="var(--han-nom-font, &quot;Vietnamica NomNaTong&quot;, &quot;Vietnamica DengXian&quot;, sans-serif)" pointer-events="none" paint-order="stroke" stroke="#17191c" stroke-width="{stroke_width}">{label}</text>' if label else ''}'''
+            {label_markup}'''
         # Handles are pre-rendered for local selection changes; CSS exposes
         # them only on the browser-local active region.
         if step in (3, 6):
@@ -227,6 +250,12 @@ def snapshot(s):
             help_text=('Drag the text cards into the sequence that should be assigned to the spatially sorted boxes.'
                        if chips else 'This confirmed source mismatch has no character mapping to arrange.')
             markup+=f'''<section class="order-editor"><div class="order-heading"><div><span class="eyebrow">CHARACTER ANNOTATION</span><h2>{title}</h2></div>
+                <button type="button" class="sidebar-toggle-btn sidebar-expand-tab" id="sidebar-expand-order-btn" title="Mở lại Inspector (Expand sidebar)" aria-label="Expand Inspector">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#f4f4f5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="6 3 11 8 6 13"></polyline>
+                    </svg>
+                    <span>Inspector</span>
+                </button>
 </div>
                 <p class="order-help">{help_text}</p>
                 <div class="order-chips" data-excluded-count="{excluded_count}" data-alignment-ready="false" aria-busy="true" role="list" aria-label="Sortable character assignment">{''.join(chips)}</div>

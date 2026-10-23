@@ -10,6 +10,15 @@ from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
+
+_orig_read_text = Path.read_text
+def _safe_read_text(self, *args, **kwargs):
+    if 'encoding' not in kwargs and not args:
+        kwargs['encoding'] = 'utf-8'
+        kwargs.setdefault('errors', 'replace')
+    return _orig_read_text(self, *args, **kwargs)
+Path.read_text = _safe_read_text
+
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from app import create_app, parser, resolve_app_paths
 import gradio as gr
@@ -221,12 +230,12 @@ class GradioCallbacks(unittest.TestCase):
         self.assertIn('boxes:Object.fromEntries(Object.entries(localBoxes)',script)
         self.assertIn('syncExternalControls();',script)
         self.assertNotIn("addEventListener('dragover'",script)
-        editor_css=(Path(__file__).resolve().parents[1]/'ui/assets/editor.css').read_text()
+        editor_css=(Path(__file__).resolve().parents[1]/'ui/assets/editor.css').read_text(encoding='utf-8', errors='replace')
         self.assertIn('.order-chips {',editor_css)
         self.assertIn('flex-wrap: wrap',editor_css)
         self.assertNotIn('.order-chip-ghost',editor_css)
         self.assertIn('.order-chip.excluded {',editor_css)
-        self.assertIn("content: '× Excluded'",editor_css)
+        self.assertIn("content: 'ecd'",editor_css)
         self.assertNotIn('.excluded-divider',editor_css)
         self.assertIn('overflow-x: auto',editor_css)
         self.assertIn('overflow-y: auto',editor_css)

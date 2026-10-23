@@ -166,6 +166,30 @@ class Workflow:
                     self.content_titles, self.metadata_fields)
         return restored
 
+    def draft_path(self, image_name):
+        code = Path(image_name).stem
+        return self.output / '.drafts' / f'{code}_step3.json'
+
+    def save_draft(self, state):
+        if not state.get('image'):
+            raise ValueError('No active image to save draft for.')
+        path = self.draft_path(state['image'])
+        draft_doc = {
+            'image': state['image'],
+            'code': state['code'],
+            'image_size': state['image_size'],
+            'annotation_text': state.get('annotation_text', ''),
+            'verified_content': state.get('verified_content') or state.get('draft_content'),
+            'regions': deepcopy(state.get('regions', {})),
+            'box_id_by_region': deepcopy(state.get('box_id_by_region', {})),
+            'region_uid_by_box_id': deepcopy(state.get('region_uid_by_box_id', {})),
+            'bounding_boxes': deepcopy(state.get('bounding_boxes', {})),
+            'source_mismatch': deepcopy(state.get('source_mismatch')),
+        }
+        atomic_write(path, draft_doc)
+        log.info('Saved Step 3 draft to %s (%d regions)', path, len(draft_doc['regions']))
+        return path
+
     def open_image(self, path):
         state = new_state()
         path = Path(path).resolve()
@@ -204,7 +228,39 @@ class Workflow:
             raise ValueError('Both a normal annotation and source mismatch exist for this image.')
         saved_crop = None
         persisted = saved if saved.exists() else mismatch_saved if mismatch_saved.exists() else None
-        if persisted:
+        draft = self.draft_path(path.name)
+        use_draft = draft.exists() and (not persisted or draft.stat().st_mtime > persisted.stat().st_mtime)
+        if use_draft:
+            try:
+                draft_doc = read_json(draft)
+                if (draft_doc.get('image') == path.name
+                        and draft_doc.get('image_size') == size
+                        and isinstance(draft_doc.get('regions'), dict)):
+                    if draft_doc.get('verified_content'):
+                        state['verified_content'] = deepcopy(draft_doc['verified_content'])
+                        state['draft_content'] = deepcopy(draft_doc['verified_content'])
+                        state['source_content'] = deepcopy(draft_doc['verified_content'])
+                    if draft_doc.get('annotation_text'):
+                        state['annotation_text'] = draft_doc['annotation_text']
+                    state['workflow']['content_verified'] = True
+                    state['regions'] = deepcopy(draft_doc['regions'])
+                    state['box_id_by_region'] = deepcopy(draft_doc.get('box_id_by_region', {}))
+                    state['region_uid_by_box_id'] = deepcopy(draft_doc.get('region_uid_by_box_id', {}))
+                    state['bounding_boxes'] = deepcopy(draft_doc.get('bounding_boxes', {}))
+                    if draft_doc.get('source_mismatch'):
+                        state['source_mismatch'] = deepcopy(draft_doc['source_mismatch'])
+                    state['detection_loaded'] = True
+                    refresh_bbox_validation(state)
+                    state['current_step'] = 3
+                    state['selected_region_uid'] = next(iter(state['regions']), None)
+                    state['selected_region_uids'] = [state['selected_region_uid']] if state['selected_region_uid'] else []
+                    state['selection_cleared'] = False
+                    log.info('Hydrated Step 3 draft for %s (%d boxes)', path.name, len(state['regions']))
+            except Exception as exc:
+                log.warning('Could not load draft for %s: %s', path.name, exc)
+        elif persisted:
+            if draft.exists():
+                draft.unlink(missing_ok=True)
             restored_content = self._saved_content_for(path.name, located['code'], located['record'])
             state.update(source_content=deepcopy(restored_content),
                          source_baseline=deepcopy(restored_content),
@@ -434,7 +490,8 @@ class Workflow:
             if step != 3:
                 raise ValueError('Edit bounding boxes in Step 3.')
             if action == 'detect':
-                if getattr(self.options, 'skip_detection', False):
+                api_url = getattr(self.options, 'detection_api_url', None)
+                if getattr(self.options, 'skip_detection', False) and not api_url:
                     raise ValueError('Detection is disabled (--skip-detection). Draw boxes manually.')
                 # Detection IDs are discarded; Gradio owns hidden region identity.
                 doc = detect(s['image_path'], self.options)
@@ -690,9 +747,14 @@ class Workflow:
                               document_hash=fingerprint(json.dumps(document, sort_keys=True, ensure_ascii=False))))
             stale_meta = self.output / '.state' / ('' if mismatch else 'source_mismatches') / path.name
             stale_meta.unlink(missing_ok=True)
+            self.draft_path(s['image']).unlink(missing_ok=True)
             s['saved'] = True
             s['crop_saved'] = True
             log.info('Saved annotation %s', path)
+        elif action == 'save_draft':
+            if step != 3:
+                raise ValueError('Draft can only be saved in Step 3.')
+            self.save_draft(s)
         elif action == 'crop':
             if step != 6:
                 raise ValueError('Edit crop in Step 6.')

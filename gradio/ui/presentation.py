@@ -6,7 +6,7 @@ from annotation.state import source_mismatch_confirmed
 from .fonts import FONT_CSS
 from .icons import ALERT, CHECK
 
-APP_CSS = FONT_CSS + (Path(__file__).parent / 'assets/workbench.css').read_text()
+APP_CSS = FONT_CSS + (Path(__file__).parent / 'assets/workbench.css').read_text(encoding='utf-8', errors='replace')
 LABELS = ('Image', 'Content', 'Bounding Boxes & Sort', 'Status & Order', 'Crop', 'Review')
 SECTION_LABELS = {
     'Nguyên văn chữ Hán Nôm': 'Nguyên văn chữ Hán Nôm',
@@ -45,9 +45,21 @@ def header(state):
 
 def panel_heading(state):
     step = display_step(state['current_step'])
+    collapse_btn = ''
+    if step == 4:
+        collapse_btn = '''<button type="button" class="sidebar-toggle-btn sidebar-collapse-btn" id="sidebar-collapse-btn" title="Thu gọn Inspector (Collapse sidebar) [ [ ]" aria-label="Collapse sidebar">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#f4f4f5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="10 3 5 8 10 13"></polyline>
+            </svg>
+        </button>'''
     return f'''<div class="panel-heading">
-      <span class="panel-eyebrow">Inspector</span>
-      <h2>{LABELS[step-1]}</h2>
+      <div class="panel-heading-row">
+        <div>
+          <span class="panel-eyebrow">Inspector</span>
+          <h2>{LABELS[step-1]}</h2>
+        </div>
+        {collapse_btn}
+      </div>
     </div>'''
 
 

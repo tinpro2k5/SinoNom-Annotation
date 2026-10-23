@@ -150,6 +150,21 @@ const applyImageOnlyMode = (enabled) => {
 root.addEventListener('canvas-image-only-change', event => {
   applyImageOnlyMode(event.detail);
 });
+let boxNumbersVisible = true;
+const applyBoxNumbersMode = (visible) => {
+  boxNumbersVisible = visible !== false;
+  const svg = element.querySelector('.annotation-canvas');
+  if (svg) svg.classList.toggle('hide-box-numbers', !boxNumbersVisible);
+  const btn = element.querySelector('[data-toggle-numbers]');
+  if (btn) btn.classList.toggle('active', boxNumbersVisible);
+  const chk = root.querySelector('#show-box-numbers input[type="checkbox"]');
+  if (chk && chk.checked !== boxNumbersVisible) {
+    chk.checked = boxNumbersVisible;
+  }
+};
+root.addEventListener('canvas-toggle-numbers', event => {
+  applyBoxNumbersMode(event.detail);
+});
 const statusColor = (status, expert = false) => expert ? '#facc15' : status === 'damaged' ? '#ef4444' : '#22c55e';
 const textColor = box => box.unavailable_font ? '#ec4899' : box.expert_prediction ? '#facc15' : '#ffffff';
 // Status rendering and selection share opacity so hydration cannot erase Font fill.
@@ -472,6 +487,44 @@ const updateCanvasLabels = () => {
       const labelText = publicBox ? (hasOrder
         ? `${b.order}${assignedCharacter ? ` ${assignedCharacter}` : ''}` : '') : '';
       text.textContent = labelText;
+      if (typeof window !== 'undefined' && window.document && text instanceof window.SVGElement) {
+        text.textContent = '';
+        if (publicBox && (hasOrder || assignedCharacter)) {
+          const numSize = Math.max(9 * unit, Math.min(bw, bh) * 0.22);
+          const charSize = Math.max(12 * unit, Math.min(bw, bh) * 0.42);
+          const maxW = props.value.step === 7 ? (props.value.canvasWidth || props.value.width) : props.value.width;
+          const isNearRight = (box[2] + charSize * 1.5) > maxW;
+          const charX = isNearRight ? box[0] - 4 * unit : box[2] + 4 * unit;
+          const charAnchor = isNearRight ? 'end' : 'start';
+          const charY = (box[1] + box[3]) / 2;
+          const numX = box[0] + 3 * unit;
+          const numY = box[1] + 3 * unit;
+
+          if (hasOrder) {
+            const numSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+            numSpan.setAttribute('class', 'box-order-num');
+            numSpan.setAttribute('x', numX);
+            numSpan.setAttribute('y', numY);
+            numSpan.setAttribute('font-size', numSize);
+            numSpan.setAttribute('font-weight', '700');
+            numSpan.setAttribute('text-anchor', 'start');
+            numSpan.setAttribute('dominant-baseline', 'hanging');
+            numSpan.textContent = String(b.order);
+            text.appendChild(numSpan);
+          }
+          if (assignedCharacter) {
+            const charSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+            charSpan.setAttribute('class', 'box-char-label');
+            charSpan.setAttribute('x', charX);
+            charSpan.setAttribute('y', charY);
+            charSpan.setAttribute('font-size', charSize);
+            charSpan.setAttribute('text-anchor', charAnchor);
+            charSpan.setAttribute('dominant-baseline', 'central');
+            charSpan.textContent = assignedCharacter;
+            text.appendChild(charSpan);
+          }
+        }
+      }
       g.dataset.order = hasOrder ? String(b.order) : '';
       const title = g.querySelector(':scope > title');
       if (title && props.value.step === 3) {
@@ -566,6 +619,9 @@ const hydrateLocalState = () => {
   applyAnnotationColor();
   applyImageOnlyMode(
     root.querySelector('#show-image-only input[type="checkbox"]')?.checked
+  );
+  applyBoxNumbersMode(
+    root.querySelector('#show-box-numbers input[type="checkbox"]')?.checked ?? boxNumbersVisible
   );
 };
 
@@ -696,6 +752,11 @@ if (sidebar) resizeObserver.observe(sidebar);
 
 root.addEventListener('change', event => {
   if (syncingStatusControl) return;
+  const numbersCheckbox = event.target.closest('#show-box-numbers input[type="checkbox"]');
+  if (numbersCheckbox) {
+    applyBoxNumbersMode(numbersCheckbox.checked);
+    return;
+  }
   if (handleAnnotationColor(event.target)) return;
   const suspicious = event.target.closest('#suspicious-toggle input');
   if (suspicious && props.value.step === 4 && activeBoxId) {
@@ -841,14 +902,33 @@ const drawPreview = (group, box) => {
     const bw = box[2] - box[0];
     const bh = box[3] - box[1];
     const unit = Math.max(props.value.width, props.value.height) / 900;
-    const fontSize = Math.max(10 * unit, Math.min(bw, bh) * 0.30);
-    const strokeWidth = Math.max(0.5, fontSize * 0.1);
-    const centerX = (box[0] + box[2]) / 2;
-    label.setAttribute('x', centerX);
-    label.setAttribute('y', Math.max(fontSize, box[1] - 3 * unit));
-    label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('font-size', fontSize);
+    const strokeWidth = Math.max(0.5, Math.max(10 * unit, Math.min(bw, bh) * 0.30) * 0.1);
     label.setAttribute('stroke-width', strokeWidth);
+    const numSpan = label.querySelector ? label.querySelector('.box-order-num') : null;
+    const charSpan = label.querySelector ? label.querySelector('.box-char-label') : null;
+    if (numSpan || charSpan) {
+      if (numSpan) {
+        numSpan.setAttribute('x', box[0] + 3 * unit);
+        numSpan.setAttribute('y', box[1] + 3 * unit);
+        numSpan.setAttribute('font-size', Math.max(9 * unit, Math.min(bw, bh) * 0.22));
+      }
+      if (charSpan) {
+        const charSize = Math.max(12 * unit, Math.min(bw, bh) * 0.42);
+        const maxW = props.value.step === 7 ? (props.value.canvasWidth || props.value.width) : props.value.width;
+        const isNearRight = (box[2] + charSize * 1.5) > maxW;
+        charSpan.setAttribute('x', isNearRight ? box[0] - 4 * unit : box[2] + 4 * unit);
+        charSpan.setAttribute('y', (box[1] + box[3]) / 2);
+        charSpan.setAttribute('text-anchor', isNearRight ? 'end' : 'start');
+        charSpan.setAttribute('font-size', charSize);
+      }
+    } else {
+      const fontSize = Math.max(10 * unit, Math.min(bw, bh) * 0.30);
+      const centerX = (box[0] + box[2]) / 2;
+      label.setAttribute('x', centerX);
+      label.setAttribute('y', Math.max(fontSize, box[1] - 3 * unit));
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('font-size', fontSize);
+    }
   }
   const corners = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]];
   group.querySelectorAll('[data-corner]').forEach(handle => {
@@ -1567,6 +1647,12 @@ root.addEventListener('click', event => {
       imageTransform.zoom + (control.dataset.zoom === 'in' ? 25 : -25)));
     applyZoom(); return;
   }
+  const numbersBtn = event.target.closest('[data-toggle-numbers]');
+  if (numbersBtn) {
+    event.preventDefault();
+    applyBoxNumbersMode(!boxNumbersVisible);
+    return;
+  }
   const deleteBtn = event.target.closest('#delete-box');
   if (deleteBtn) {
     event.preventDefault();
@@ -1735,6 +1821,21 @@ root.addEventListener('click', event => {
 });
 
 window.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S' || event.code === 'KeyS')) {
+    event.preventDefault();
+    const saveDraftBtn = document.getElementById('save-draft-button');
+    if (saveDraftBtn && !saveDraftBtn.hidden && saveDraftBtn.offsetParent !== null) {
+      saveDraftBtn.click();
+      return;
+    }
+    const saveBtn = document.getElementById('save-image');
+    if (saveBtn && !saveBtn.hidden && saveBtn.offsetParent !== null) {
+      saveBtn.click();
+      return;
+    }
+    return;
+  }
+
   const activeElem = document.activeElement;
   if (activeElem && (activeElem.tagName === 'INPUT' || activeElem.tagName === 'TEXTAREA' || activeElem.tagName === 'SELECT' || activeElem.isContentEditable)) {
     return;
@@ -1840,3 +1941,55 @@ const alignmentObserver = new MutationObserver(() => {
 });
 alignmentObserver.observe(element, { childList: true, subtree: true });
 hydrateLocalState();
+
+// Sidebar collapse and expand management (Step 4 only)
+function toggleSidebar(forceState) {
+  if (props.value?.step !== 4) return;
+  const ws = document.getElementById('workspace');
+  if (!ws) return;
+  const isCollapsed = forceState !== undefined ? forceState : !ws.classList.contains('sidebar-collapsed');
+  ws.classList.toggle('sidebar-collapsed', isCollapsed);
+  try {
+    sessionStorage.setItem('sidebar_collapsed_step4', isCollapsed ? '1' : '0');
+  } catch (_) {}
+  window.dispatchEvent(new Event('resize'));
+  if (typeof applyZoom === 'function') {
+    requestAnimationFrame(applyZoom);
+  }
+}
+
+if (!window.__sidebarToggleInitialized) {
+  window.__sidebarToggleInitialized = true;
+  document.addEventListener('click', event => {
+    if (event.target.closest('#sidebar-collapse-btn')) {
+      toggleSidebar(true);
+      return;
+    }
+    if (event.target.closest('.sidebar-expand-tab')) {
+      toggleSidebar(false);
+      return;
+    }
+  });
+
+  document.addEventListener('keydown', event => {
+    const tag = event.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
+    if (event.key === '[' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (props.value?.step === 4) {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    }
+  });
+}
+
+try {
+  const ws = document.getElementById('workspace');
+  if (props.value?.step === 4 && sessionStorage.getItem('sidebar_collapsed_step4') === '1') {
+    ws?.classList.add('sidebar-collapsed');
+  } else if (props.value?.step !== 4) {
+    ws?.classList.remove('sidebar-collapsed');
+  }
+} catch (_) {}
+
+

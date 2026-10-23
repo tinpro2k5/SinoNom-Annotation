@@ -277,6 +277,8 @@ def parser():
                    help='Override config gradio.output_dir.')
     p.add_argument('--skip-detection', action='store_true',
                    help='Disable detection; load existing annotations or draw boxes manually.')
+    p.add_argument('--detection-api-url', default=None,
+                   help='Remote Detection API URL (e.g. https://xxx.trycloudflare.com) for running models on Kaggle/Colab.')
     p.add_argument('--vague-det-config', default=str(REPO_ROOT / 'text_detection/models/ckpts/damage_detect.py'))
     p.add_argument('--vague-det-weights', default=str(REPO_ROOT / 'text_detection/models/ckpts/damage_detect.pth'))
     p.add_argument('--ocr-det-executable', default=str(REPO_ROOT / 'text_detection/models/dists/det_model/det_model'))
@@ -405,8 +407,9 @@ def create_app(options):
                     delete=gr.Button('Delete Selected', size='sm', min_width=0,
                                      elem_id='delete-box')
                     detect_confirm=gr.Checkbox(value=False,visible=False)
+                    has_detection = bool(getattr(options, 'detection_api_url', None)) or not skip_detection
                     detect=gr.Button('Run Detection', variant='primary',
-                                     interactive=not skip_detection,elem_id='run-detection')
+                                     interactive=has_detection,elem_id='run-detection')
                     with gr.Group(visible=False,
                                   elem_classes=['section','sidebar-section','sidebar-component','mismatch-panel']) as mismatch_group:
                         gr.Markdown('### Box-Content Validation')
@@ -433,8 +436,12 @@ def create_app(options):
                 with gr.Group(visible=False,
                               elem_classes=['section','sidebar-section','sidebar-component','selection-section']) as status_group:
                     gr.Markdown('### Selected region')
+                    detect_damage_btn=gr.Button('🔍 Auto-detect Damage (DINO)', variant='secondary',
+                                               elem_id='auto-detect-damage')
                     hide_canvas_overlays=gr.Checkbox(
                         value=False,label='Show image only',elem_id='show-image-only')
+                    show_box_numbers=gr.Checkbox(
+                        value=True,label='Show box numbers',elem_id='show-box-numbers')
                     status_id=gr.Dropdown(visible=False)
                     status=gr.Radio(['intact','damaged'],value='intact',label='Selected box status',elem_id='status-radio')
                     damage_level=gr.Radio(['Unselected','1','2','3'],value='Unselected',label='Damage level',interactive=True,elem_id='damage-level-radio')
@@ -452,6 +459,13 @@ def create_app(options):
                         value='White',show_label=False,interactive=True,
                         filterable=False,container=False,
                         elem_id='bbox-color-palette')
+                with gr.Accordion('Remote Detection API', open=False,
+                                  elem_classes=['section','sidebar-section','sidebar-component']):
+                    api_url_input=gr.Textbox(
+                        label='API URL (Cloudflare Tunnel)',
+                        value=getattr(options, 'detection_api_url', '') or '',
+                        placeholder='https://xxxx.trycloudflare.com',
+                        elem_id='detection-api-url-input')
                 # Preserve the status-table callback slot without rendering the
                 # redundant region table.
                 status_table=gr.State([])
@@ -503,6 +517,7 @@ def create_app(options):
         with gr.Row(visible=False, elem_id='workflow-footer',elem_classes='button-group') as workflow_footer:
             back=gr.Button('Back', interactive=False, scale=0, elem_id='back-button')
             footer_label=gr.HTML(footer(initial['active']), elem_id='footer-step')
+            save_draft=gr.Button('💾 Save Progress (Ctrl+S)', visible=False, variant='secondary', scale=0, elem_id='save-draft-button')
             save=gr.Button('Save Annotation',visible=False,variant='primary', scale=0, elem_id='save-image')
             next_button=gr.Button('Next',variant='primary',interactive=False, scale=0, elem_id='next-button')
         # Preserve callback output slots while removing the normalized-text component.
@@ -522,6 +537,7 @@ def create_app(options):
         ])
         outputs.append(save_all)
         outputs.append(image_choice)
+        outputs.append(save_draft)
 
         def render(ctx, msg=''):
             if msg:
@@ -591,6 +607,7 @@ def create_app(options):
                     gr.update(visible=step==7 and bool(source_mismatch_json))]
             rendered.append(gr.update(interactive=has_saved_image_records()))
             rendered.append(gr.update(value=s.get('image_path') if step == 1 else None))
+            rendered.append(gr.update(visible=has and step == 3, interactive=has and step == 3))
             return rendered
 
         def run(ctx, action, payload=None, auto_detect=True):
@@ -690,6 +707,16 @@ def create_app(options):
                 document.querySelector('#annotation-board')?.dispatchEvent(
                     new CustomEvent('canvas-image-only-change', {
                         detail: Boolean(showImageOnly), bubbles: true
+                    })
+                );
+            }""")
+        show_box_numbers.change(
+            fn=None, inputs=[show_box_numbers], outputs=None,
+            show_progress='hidden',
+            js="""(showNumbers) => {
+                document.querySelector('#annotation-board')?.dispatchEvent(
+                    new CustomEvent('canvas-toggle-numbers', {
+                        detail: Boolean(showNumbers), bubbles: true
                     })
                 );
             }""")
@@ -1121,6 +1148,61 @@ def create_app(options):
                 }
                 return [ctx, ok];
             }""")))
+        def on_api_url_change(val):
+            url = (val or '').strip() or None
+            setattr(options, 'detection_api_url', url)
+            return gr.update(interactive=bool(url) or not skip_detection)
+        api_url_input.change(on_api_url_change, inputs=[api_url_input], outputs=[detect])
+
+        def on_detect_damage(ctx):
+            s = ctx['active']
+            if s.get('current_step') != 4:
+                return render(ctx, WARNING + ' Damage detection is only available in Step 4.')
+            api_url = getattr(options, 'detection_api_url', None)
+            if not api_url:
+                return render(ctx, WARNING + ' Please configure Remote Detection API URL in settings to run damage detection.')
+            if not s.get('bounding_boxes'):
+                return render(ctx, WARNING + ' No bounding boxes found to classify.')
+            try:
+                from annotation.detection_adapter import detect_damage_remote
+                boxes_dict = {
+                    box_id: box_data['bbox']
+                    for box_id, box_data in s['bounding_boxes'].items()
+                }
+                res = detect_damage_remote(s['image_path'], boxes_dict, api_url)
+                damage_statuses = res.get('damage_statuses', {})
+                uid_statuses = {
+                    s['region_uid_by_box_id'][box_id]: status
+                    for box_id, status in damage_statuses.items()
+                    if box_id in s.get('region_uid_by_box_id', {})
+                }
+                for uid in s['regions']:
+                    if uid not in uid_statuses:
+                        uid_statuses[uid] = s['regions'][uid]['status']
+                updated = engine.apply(s, 'statuses', payload={'statuses': uid_statuses})
+                ctx = dict(ctx, active=updated)
+                dmg_count = res.get('damaged_count', 0)
+                tot_count = res.get('total_boxes', len(boxes_dict))
+                elapsed = res.get('elapsed_ms', 0)
+                msg = f'✓ Auto-detected damage: {dmg_count}/{tot_count} boxes damaged ({elapsed}ms)'
+                return render(ctx, msg)
+            except Exception as e:
+                log.exception('Remote damage detection failed')
+                return render(ctx, WARNING + f' Damage detection failed: {e}')
+
+        clear_loading_when_done(detect_damage_btn.click(
+            on_detect_damage,
+            inputs=[session],
+            **dict(event_args, js="""(ctx) => {
+                const el = document.getElementById('global-loading');
+                if (el) {
+                    const label = el.querySelector('span:not(.global-loading-spinner)');
+                    if (label) label.textContent = 'Scanning damage with DINO…';
+                    el.classList.add('is-visible');
+                }
+                return [ctx];
+            }""")
+        ))
         def sort_current_boxes(ctx,selection,a,b,d,e):
             try:
                 ctx,_,_=commit_frontend_boxes(ctx,selection)
@@ -1159,6 +1241,21 @@ def create_app(options):
         clear_loading_when_done(clear_mismatch.click(
             clear_source_mismatch,[session,selection_bridge],
             **dict(event_args,js=snapshot_board_state_js(1,deselect=True))))
+        def save_step3_draft(ctx, selection):
+            try:
+                ctx, _, _ = commit_frontend_boxes(ctx, selection)
+                engine.save_draft(ctx['active'])
+                if ctx.get('active', {}).get('image_path'):
+                    ctx['drafts'][ctx['active']['image_path']] = deepcopy(ctx['active'])
+                gr.Info('Đã lưu tiến độ vào .drafts!')
+                return render(ctx)
+            except Exception as exc:
+                log.exception('Failed to save Step 3 draft')
+                return render(ctx, WARNING + ' ' + html.escape(str(exc)))
+
+        clear_loading_when_done(save_draft.click(
+            save_step3_draft, [session, selection_bridge],
+            **dict(event_args, js=snapshot_board_state_js(1, label_text='Saving progress…'))))
         for selector in (box_id,status_id):
             clear_loading_when_done(selector.input(lambda c,i:run(c,'select',dict(id=i)),[session,selector],**event_args))
         def on_action(ctx,evt:gr.EventData):
