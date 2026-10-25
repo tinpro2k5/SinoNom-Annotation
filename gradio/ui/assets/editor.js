@@ -244,7 +244,8 @@ const syncExternalControls = () => {
   const active = activeBoxId && localBoxes[activeBoxId];
   if (props.value.step === 4) {
     const chip = activeBoxId && element.querySelector(
-      `[data-order-chip][data-assigned-box-id="${activeBoxId}"]`);
+      `[data-order-chip][data-assigned-box-id="${activeBoxId}"]`) ||
+      [...element.querySelectorAll('[data-order-chip]')].find(chip => chip.dataset.tokenId === activeTokenId);
     activeTokenId = chip?.dataset.tokenId || null;
     const isMissing = Boolean(chip?.classList.contains('missing') || chip?.dataset.character === '[MISS]');
     const isExcluded = Boolean(chip?.classList.contains('excluded'));
@@ -294,7 +295,7 @@ const syncExternalControls = () => {
       }
     }
   }
-  if (props.value.step === 4) {
+  if (props.value.step === 4 && active) {
     const statusRadio = root.querySelector(`#status-radio input[value="${active.status}"]`);
     if (statusRadio && !statusRadio.checked) {
       syncingStatusControl = true;
@@ -446,10 +447,14 @@ const renderSelection = (sync = true) => {
       rect.setAttribute('stroke-width', suspicious && active ? '3' : suspicious ? '2' : active ? '2.5' : selected ? '2' : '1.5');
     }
   });
-  element.querySelectorAll('[data-order-chip]').forEach(chip => {
-    chip.classList.remove('selected-chip');
-  });
+  const chips = [...element.querySelectorAll('[data-order-chip]')];
+  if (props.value.step === 4 && activeBoxId) {
+    activeTokenId = chips.find(chip => chip.dataset.assignedBoxId === activeBoxId)?.dataset.tokenId || null;
+  }
+  chips.forEach(chip => chip.classList.toggle('selected-chip',
+    props.value.step === 4 && chip.dataset.tokenId === activeTokenId));
   if (sync) syncExternalControls();
+  updateAlignmentControls();
 };
 const updateCanvasLabels = () => {
   const characterByBoxId = new Map(
@@ -490,15 +495,15 @@ const updateCanvasLabels = () => {
       if (typeof window !== 'undefined' && window.document && text instanceof window.SVGElement) {
         text.textContent = '';
         if (publicBox && (hasOrder || assignedCharacter)) {
-          const numSize = Math.max(9 * unit, Math.min(bw, bh) * 0.22);
-          const charSize = Math.max(12 * unit, Math.min(bw, bh) * 0.42);
+          const numSize = Math.max(6 * unit, Math.min(bw, bh) * 0.14);
+          const charSize = Math.max(9 * unit, Math.min(bw, bh) * 0.30);
           const maxW = props.value.step === 7 ? (props.value.canvasWidth || props.value.width) : props.value.width;
           const isNearRight = (box[2] + charSize * 1.5) > maxW;
-          const charX = isNearRight ? box[0] - 4 * unit : box[2] + 4 * unit;
+          const charX = isNearRight ? box[0] - 0.4 * unit : box[2] + 0.4 * unit;
           const charAnchor = isNearRight ? 'end' : 'start';
           const charY = (box[1] + box[3]) / 2;
-          const numX = box[0] + 3 * unit;
-          const numY = box[1] + 3 * unit;
+          const numX = box[0] + 0.4 * unit;
+          const numY = box[1] + 0.4 * unit;
 
           if (hasOrder) {
             const numSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
@@ -535,6 +540,7 @@ const updateCanvasLabels = () => {
 };
 
 const hydrateLocalState = () => {
+  syncSidebarState();
   const context = `${props.value.image || ''}:${props.value.step}`;
   alignmentStateReady = false;
   alignmentContainer = null;
@@ -730,6 +736,10 @@ const send = (action, payload = {}) => {
   });
 };
 watch('value', () => {
+  const loadToast = document.getElementById('load-source-toast');
+  if (loadToast && window.__dismissedLoadToastKey === loadToast.dataset.toastKey) {
+    loadToast.remove();
+  }
   // A Gradio value update can replace the chip DOM while a pointer session is
   // active (including leaving Character Alignment). Finish before hydration.
   if (orderDrag) cleanupOrderDrag('rerender', false);
@@ -908,15 +918,15 @@ const drawPreview = (group, box) => {
     const charSpan = label.querySelector ? label.querySelector('.box-char-label') : null;
     if (numSpan || charSpan) {
       if (numSpan) {
-        numSpan.setAttribute('x', box[0] + 3 * unit);
-        numSpan.setAttribute('y', box[1] + 3 * unit);
-        numSpan.setAttribute('font-size', Math.max(9 * unit, Math.min(bw, bh) * 0.22));
+        numSpan.setAttribute('x', box[0] + 0.4 * unit);
+        numSpan.setAttribute('y', box[1] + 0.4 * unit);
+        numSpan.setAttribute('font-size', Math.max(6 * unit, Math.min(bw, bh) * 0.14));
       }
       if (charSpan) {
-        const charSize = Math.max(12 * unit, Math.min(bw, bh) * 0.42);
+        const charSize = Math.max(9 * unit, Math.min(bw, bh) * 0.30);
         const maxW = props.value.step === 7 ? (props.value.canvasWidth || props.value.width) : props.value.width;
         const isNearRight = (box[2] + charSize * 1.5) > maxW;
-        charSpan.setAttribute('x', isNearRight ? box[0] - 4 * unit : box[2] + 4 * unit);
+        charSpan.setAttribute('x', isNearRight ? box[0] - 0.4 * unit : box[2] + 0.4 * unit);
         charSpan.setAttribute('y', (box[1] + box[3]) / 2);
         charSpan.setAttribute('text-anchor', isNearRight ? 'end' : 'start');
         charSpan.setAttribute('font-size', charSize);
@@ -967,6 +977,7 @@ const drawImageResizePreview = (state, size) => {
 const setSelection = (ids, active = null, sync = true) => {
   selectedIds = new Set(ids.filter(id => localBoxes[id]));
   activeBoxId = active && localBoxes[active] ? active : selectedIds.values().next().value || null;
+  if (props.value.step === 4) activeTokenId = null;
   renderSelection(sync);
 };
 root.addEventListener('deselect-regions', () => setSelection([], null));
@@ -1017,6 +1028,7 @@ function initializeAlignmentStateFromDOM() {
     alignmentStateReady = false;
     alignmentContainer = null;
     alignmentCanvas = null;
+    updateAlignmentControls();
     return false;
   }
   localTokenOrder = tokenOrderFromDOM(container);
@@ -1029,6 +1041,7 @@ function initializeAlignmentStateFromDOM() {
   container.setAttribute('aria-busy', 'false');
   updateExcludedChips(container);
   updateCanvasLabels();
+  updateAlignmentControls();
   return true;
 }
 const updateExcludedChips = container => {
@@ -1039,6 +1052,7 @@ const updateExcludedChips = container => {
   const count = Number(container.dataset.excludedCount || 0);
   chips.forEach((chip, index) => {
     const excluded = count > 0 && index >= chips.length - count;
+    chip.setAttribute('aria-label', `Reading position ${index + 1}: ${chip.dataset.character}`);
     chip.classList.toggle('excluded', excluded);
     chip.title = excluded ? 'Excluded from annotation data' : chip.dataset.character;
     const boxId = excluded ? '' : String((props.value.spatialBoxOrder || [])[index] || '');
@@ -1127,6 +1141,78 @@ function renderSuspiciousPreview() {
     } else if (!hasSuspicious) label?.remove();
   }
   applyAnnotationColor();
+}
+
+function updateAlignmentControls() {
+  const controls = element.querySelector('.alignment-actions');
+  if (!controls) return;
+  const container = element.querySelector('.order-chips');
+  const chips = [...(container?.querySelectorAll('[data-order-chip]') || [])];
+  const index = chips.findIndex(chip => chip.dataset.tokenId === activeTokenId);
+  const ready = props.value.step === 4 && alignmentStateReady && !pending
+    && container === alignmentContainer && container?.dataset.alignmentReady === 'true';
+  const label = controls.querySelector('[data-alignment-selected]');
+  if (label) label.textContent = index < 0 ? 'Chọn một thẻ chữ hoặc box trên ảnh.'
+    : `Đã chọn: ${chips[index].dataset.character} · vị trí ${index + 1}`;
+  const target = controls.querySelector('[data-alignment-target]');
+  if (target) {
+    target.max = String(chips.length);
+    target.placeholder = `1–${chips.length}`;
+    target.disabled = !ready;
+  }
+  controls.querySelectorAll('[data-alignment-action]').forEach(button => {
+    button.disabled = !ready || index < 0;
+  });
+}
+
+function selectAlignmentToken(chip) {
+  activeTokenId = chip.dataset.tokenId;
+  const id = chip.dataset.assignedBoxId;
+  activeBoxId = id && localBoxes[id] ? id : null;
+  selectedIds = new Set(activeBoxId ? [activeBoxId] : []);
+  const feedback = element.querySelector('[data-alignment-feedback]');
+  if (feedback) feedback.textContent = '';
+  renderSelection();
+}
+
+function applyAlignmentPositionAction(action, rawPosition) {
+  const feedback = element.querySelector('[data-alignment-feedback]');
+  const report = message => { if (feedback) feedback.textContent = message; };
+  const container = element.querySelector('.order-chips');
+  if (props.value.step !== 4 || pending || orderDrag || !alignmentStateReady
+      || container !== alignmentContainer || !alignmentDOMIsReady(container)) {
+    report('Chờ danh sách chữ sẵn sàng rồi thử lại.');
+    return false;
+  }
+  const chips = [...container.querySelectorAll('[data-order-chip]')];
+  const from = chips.findIndex(chip => chip.dataset.tokenId === activeTokenId);
+  if (from < 0) {
+    report('Hãy chọn chữ cần di chuyển.');
+    return false;
+  }
+  const value = String(rawPosition).trim(), position = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(position) || position < 1 || position > chips.length) {
+    report(`Nhập vị trí nguyên từ 1 đến ${chips.length}.`);
+    return false;
+  }
+  const to = position - 1;
+  if (from === to) {
+    report('Chữ đang ở vị trí này.');
+    return false;
+  }
+  const order = chips.map(chip => chip.dataset.tokenId);
+  if (action === 'insert') order.splice(to, 0, ...order.splice(from, 1));
+  else if (action === 'swap') [order[from], order[to]] = [order[to], order[from]];
+  else return false;
+  arrangeOrder(container, order);
+  // Reuse drag/drop preview and snapshot rules, including MISS and exclusions.
+  updateExcludedChips(container);
+  localTextSequence = textSequenceFromDOM(container);
+  localTokenOrder = tokenOrderFromDOM(container);
+  isDirty = true;
+  selectAlignmentToken(chips[from]);
+  report(`Đã ${action === 'insert' ? 'chèn vào' : 'đổi chỗ với'} vị trí ${position}.`);
+  return true;
 }
 const orderRows = chips => {
   const rows = [];
@@ -1223,7 +1309,7 @@ const cleanupOrderDrag = (reason, commit = false) => {
       updateExcludedChips(state.container);
       localTextSequence = textSequenceFromDOM(state.container);
       localTokenOrder = tokenOrderFromDOM(state.container);
-      renderSelection();
+      selectAlignmentToken(state.chip);
     }
   }
   if (state.captureTarget?.hasPointerCapture?.(state.pointerId)) {
@@ -1272,6 +1358,7 @@ const handleOrderLostPointerCapture = event => {
 
 element.addEventListener('pointerdown', event => {
   if (pending) return;
+  if (event.target.closest('.alignment-actions')) return;
   const isPan = event.button === 1 || (event.button === 0 && (spacePressed || (event.shiftKey && !event.target.closest('[data-box-id]'))));
   if (isPan) {
     const viewport = element.querySelector('.image-viewport');
@@ -1293,6 +1380,7 @@ element.addEventListener('pointerdown', event => {
     if (!alignmentStateReady || container !== alignmentContainer
         || container?.dataset.alignmentReady !== 'true') return;
     if (orderDrag) cleanupOrderDrag('superseded', false);
+    selectAlignmentToken(chip);
     orderDrag = {
       active: true, chip, container, pointerId: event.pointerId,
       captureTarget: element, startX: event.clientX, startY: event.clientY,
@@ -1637,6 +1725,20 @@ root.addEventListener('click', event => {
     clearTimeout(alignmentClickTimer);
     return;
   }
+  const alignmentAction = event.target.closest('[data-alignment-action]');
+  if (alignmentAction) {
+    event.preventDefault();
+    applyAlignmentPositionAction(alignmentAction.dataset.alignmentAction,
+      element.querySelector('[data-alignment-target]')?.value || '');
+    return;
+  }
+  const alignmentChip = event.target.closest('[data-order-chip]');
+  if (alignmentChip && props.value.step === 4 && alignmentStateReady
+      && alignmentChip.closest('.order-chips') === alignmentContainer) {
+    event.preventDefault();
+    selectAlignmentToken(alignmentChip);
+    return;
+  }
   const nextBtn = event.target.closest('#next-button, #next-step, .next-button, [elem_id="next-button"]');
   if (nextBtn) {
     setSelection([], null);
@@ -1941,12 +2043,32 @@ const alignmentObserver = new MutationObserver(() => {
 });
 alignmentObserver.observe(element, { childList: true, subtree: true });
 hydrateLocalState();
+const initialLoadToast = document.getElementById('load-source-toast');
+if (initialLoadToast && window.__dismissedLoadToastKey === initialLoadToast.dataset.toastKey) {
+  initialLoadToast.remove();
+}
 
 // Sidebar collapse and expand management (Step 4 only)
-function toggleSidebar(forceState) {
-  if (props.value?.step !== 4) return;
+function syncSidebarState() {
   const ws = document.getElementById('workspace');
   if (!ws) return;
+  // The HTML component stays mounted across steps; watch('value') hydrates it.
+  // Always reveal Inspector outside Step 4, keeping only its Step 4 preference.
+  if (props.value?.step !== 4) {
+    ws.classList.remove('sidebar-collapsed');
+    return;
+  }
+  let isCollapsed = ws.classList.contains('sidebar-collapsed');
+  try {
+    isCollapsed = sessionStorage.getItem('sidebar_collapsed_step4') === '1';
+  } catch (_) {}
+  ws.classList.toggle('sidebar-collapsed', isCollapsed);
+}
+
+function toggleSidebar(forceState) {
+  if (props.value?.step !== 4) return false;
+  const ws = document.getElementById('workspace');
+  if (!ws) return false;
   const isCollapsed = forceState !== undefined ? forceState : !ws.classList.contains('sidebar-collapsed');
   ws.classList.toggle('sidebar-collapsed', isCollapsed);
   try {
@@ -1956,40 +2078,28 @@ function toggleSidebar(forceState) {
   if (typeof applyZoom === 'function') {
     requestAnimationFrame(applyZoom);
   }
+  return true;
 }
 
-if (!window.__sidebarToggleInitialized) {
-  window.__sidebarToggleInitialized = true;
-  document.addEventListener('click', event => {
-    if (event.target.closest('#sidebar-collapse-btn')) {
-      toggleSidebar(true);
-      return;
-    }
-    if (event.target.closest('.sidebar-expand-tab')) {
-      toggleSidebar(false);
-      return;
-    }
-  });
-
-  document.addEventListener('keydown', event => {
+// A remounted HTML editor must replace listeners bound to the previous props.
+const previousSidebarHandlers = window.__sidebarToggleHandlers;
+if (previousSidebarHandlers) {
+  document.removeEventListener('click', previousSidebarHandlers.click);
+  document.removeEventListener('keydown', previousSidebarHandlers.keydown);
+}
+const sidebarHandlers = {
+  click(event) {
+    if (event.target.closest('#sidebar-collapse-btn')) toggleSidebar(true);
+    else if (event.target.closest('.sidebar-expand-tab')) toggleSidebar(false);
+  },
+  keydown(event) {
     const tag = event.target?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable) return;
-    if (event.key === '[' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      if (props.value?.step === 4) {
-        event.preventDefault();
-        toggleSidebar();
-      }
-    }
-  });
-}
-
-try {
-  const ws = document.getElementById('workspace');
-  if (props.value?.step === 4 && sessionStorage.getItem('sidebar_collapsed_step4') === '1') {
-    ws?.classList.add('sidebar-collapsed');
-  } else if (props.value?.step !== 4) {
-    ws?.classList.remove('sidebar-collapsed');
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || event.target?.isContentEditable || event.isComposing) return;
+    if (event.key === '[' && !event.ctrlKey && !event.altKey && !event.metaKey
+        && toggleSidebar()) event.preventDefault();
   }
-} catch (_) {}
-
-
+};
+document.addEventListener('click', sidebarHandlers.click);
+document.addEventListener('keydown', sidebarHandlers.keydown);
+window.__sidebarToggleHandlers = sidebarHandlers;

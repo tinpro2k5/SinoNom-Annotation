@@ -1,4 +1,5 @@
 """Transactional application actions. UI receives only accepted state snapshots."""
+from datetime import datetime
 import hashlib
 import json
 import logging
@@ -174,10 +175,12 @@ class Workflow:
         if not state.get('image'):
             raise ValueError('No active image to save draft for.')
         path = self.draft_path(state['image'])
+        step = state.get('current_step', 3)
         draft_doc = {
             'image': state['image'],
             'code': state['code'],
             'image_size': state['image_size'],
+            'draft_step': step,
             'annotation_text': state.get('annotation_text', ''),
             'verified_content': state.get('verified_content') or state.get('draft_content'),
             'regions': deepcopy(state.get('regions', {})),
@@ -185,9 +188,13 @@ class Workflow:
             'region_uid_by_box_id': deepcopy(state.get('region_uid_by_box_id', {})),
             'bounding_boxes': deepcopy(state.get('bounding_boxes', {})),
             'source_mismatch': deepcopy(state.get('source_mismatch')),
+            'annotations': deepcopy(state.get('annotations', {})),
+            'reading_order': deepcopy(state.get('reading_order', [])),
+            'text_sequence': deepcopy(state.get('text_sequence', [])),
+            'text_token_ids': deepcopy(state.get('text_token_ids', [])),
         }
         atomic_write(path, draft_doc)
-        log.info('Saved Step 3 draft to %s (%d regions)', path, len(draft_doc['regions']))
+        log.info('Saved Step %d draft to %s (%d regions)', step, path, len(draft_doc['regions']))
         return path
 
     def open_image(self, path):
@@ -251,11 +258,45 @@ class Workflow:
                         state['source_mismatch'] = deepcopy(draft_doc['source_mismatch'])
                     state['detection_loaded'] = True
                     refresh_bbox_validation(state)
-                    state['current_step'] = 3
-                    state['selected_region_uid'] = next(iter(state['regions']), None)
-                    state['selected_region_uids'] = [state['selected_region_uid']] if state['selected_region_uid'] else []
-                    state['selection_cleared'] = False
-                    log.info('Hydrated Step 3 draft for %s (%d boxes)', path.name, len(state['regions']))
+                    draft_step = draft_doc.get('draft_step', 3)
+                    if (draft_step == 4 and draft_doc.get('annotations')
+                            and draft_doc.get('reading_order')):
+                        state['annotations'] = deepcopy(draft_doc['annotations'])
+                        state['reading_order'] = deepcopy(draft_doc['reading_order'])
+                        seq = draft_doc.get('text_sequence')
+                        if not seq:
+                            seq = [state['annotations'][str(b)] for b in state['reading_order'] if str(b) in state['annotations']]
+                        state['text_sequence'] = deepcopy(seq)
+                        tokens = draft_doc.get('text_token_ids')
+                        if not tokens:
+                            tokens = [str(i) for i in range(1, len(state['text_sequence']) + 1)]
+                        state['text_token_ids'] = deepcopy(tokens)
+                        state['workflow']['bbox_valid'] = True
+                        state['workflow']['alignment_valid'] = True
+                        state['current_step'] = 4
+                        first_box = str(state['reading_order'][0]) if state['reading_order'] else next(iter(state['bounding_boxes']), None)
+                        state['selected_box_id'] = first_box
+                        state['selected_region_uid'] = state['region_uid_by_box_id'].get(first_box)
+                        state['selected_token_id'] = token_id_for_box(state, first_box) if first_box else None
+                        state['selected_region_uids'] = [state['selected_region_uid']] if state['selected_region_uid'] else []
+                        state['selection_cleared'] = False
+                        log.info('Hydrated Step 4 draft for %s (%d boxes)', path.name, len(state['regions']))
+                    else:
+                        state['current_step'] = 3
+                        state['selected_region_uid'] = next(iter(state['regions']), None)
+                        state['selected_region_uids'] = [state['selected_region_uid']] if state['selected_region_uid'] else []
+                        state['selection_cleared'] = False
+                        log.info('Hydrated Step 3 draft for %s (%d boxes)', path.name, len(state['regions']))
+                    draft_mtime = draft.stat().st_mtime
+                    state['load_source_info'] = {
+                        'source': 'draft',
+                        'source_label': 'Bản nháp (Draft)',
+                        'file_name': draft.name,
+                        'file_path': str(draft),
+                        'mtime': draft_mtime,
+                        'mtime_str': datetime.fromtimestamp(draft_mtime).strftime('%d/%m/%Y %H:%M:%S'),
+                        'step': state['current_step'],
+                    }
             except Exception as exc:
                 log.warning('Could not load draft for %s: %s', path.name, exc)
         elif persisted:
@@ -313,6 +354,17 @@ class Workflow:
                                            range(1, len(state['text_sequence']) + 1)]
             state['loaded_is_mismatch'] = is_mismatch
             state['loaded_region_uid_by_box_id'] = deepcopy(state['region_uid_by_box_id'])
+            persisted_mtime = persisted.stat().st_mtime
+            has_alignment = bool(doc.get('annotations') and set(doc['annotations']) == set(state['bounding_boxes']))
+            state['load_source_info'] = {
+                'source': 'json',
+                'source_label': 'File JSON đã lưu' if not is_mismatch else 'File JSON sai lệch nguồn',
+                'file_name': ('source_mismatches/' + persisted.name) if is_mismatch else persisted.name,
+                'file_path': str(persisted),
+                'mtime': persisted_mtime,
+                'mtime_str': datetime.fromtimestamp(persisted_mtime).strftime('%d/%m/%Y %H:%M:%S'),
+                'step': 4 if has_alignment else 3,
+            }
             meta = (self.output / '.state' /
                     ('source_mismatches' if is_mismatch else '') / (path.stem + '.json'))
             if meta.exists():
@@ -752,8 +804,8 @@ class Workflow:
             s['crop_saved'] = True
             log.info('Saved annotation %s', path)
         elif action == 'save_draft':
-            if step != 3:
-                raise ValueError('Draft can only be saved in Step 3.')
+            if step not in (3, 4):
+                raise ValueError('Draft can only be saved in Step 3 or Step 4.')
             self.save_draft(s)
         elif action == 'crop':
             if step != 6:

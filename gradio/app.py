@@ -25,6 +25,7 @@ from annotation.export import (collect_annotations, collect_content_documents,
                                save_export_archive)
 from ui.editor import snapshot, source_text, SCRIPT, CSS
 from ui.presentation import (APP_CSS, app_identity, workflow_progress,
+                             load_notification_markup,
                              panel_heading, panel_summary, footer,
                              status_rows, SECTION_LABELS)
 from ui.fonts import FONT_FILES
@@ -32,6 +33,7 @@ from ui.icons import WARNING
 
 log = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CONTENT_SEARCH_JS = (REPO_ROOT / 'gradio/ui/assets/content_search.js').read_text(encoding='utf-8')
 
 
 def loading_markup(label='Loading…', visible=False):
@@ -69,6 +71,9 @@ FONT_PRELOAD_JS = f"""() => {{
 SHOW_LOADING_JS = """(...args) => {
     const el = document.getElementById('global-loading');
     const image = document.querySelector('#current-image-name')?.textContent?.trim() || 'picker';
+    if (image === 'picker') {
+        window.__dismissedLoadToastKey = null;
+    }
     if (el) {
         const label = el.querySelector('span:not(.global-loading-spinner)');
         if (label) label.textContent = 'Loading…';
@@ -490,7 +495,13 @@ def create_app(options):
                         # These are fixed record sections, so an editable/searchable
                         # combobox only delays committing a click selection.
                         field=gr.Dropdown(label='Section', filterable=False)
-                        field_value=gr.Textbox(label='Content',lines=8, elem_classes='han-nom-text')
+                        gr.HTML('''<div class="content-search" role="search" aria-label="Tìm trong nội dung">
+                            <input id="content-search-query" type="search" placeholder="Tìm trong nội dung (Ctrl+F)" aria-label="Tìm chữ trong nội dung" autocomplete="off" spellcheck="false"/>
+                            <span id="content-search-count" role="status" aria-live="polite">0/0</span>
+                            <button type="button" data-content-search="previous" title="Kết quả trước (Shift+Enter)" aria-label="Kết quả trước">↑</button>
+                            <button type="button" data-content-search="next" title="Kết quả sau (Enter)" aria-label="Kết quả sau">↓</button>
+                        </div>''')
+                        field_value=gr.Textbox(label='Content',lines=8, elem_classes='han-nom-text', elem_id='content-text')
                         content_bridge=gr.Textbox(
                             value='{}',visible=False,elem_id='content-draft-bridge')
                         with gr.Row(elem_classes='button-group'):
@@ -579,7 +590,7 @@ def create_app(options):
                 source_mismatch_json=[final]
             issue=(s.get('source_mismatch') or {}) if mismatch else {}
             counts_differ=bool(has and len(s['regions']) != count_annotation_characters(s['annotation_text']))
-            rendered=[ctx,app_identity(s),gr.update(value=msg,visible=bool(msg)),
+            rendered=[ctx,app_identity(s) + load_notification_markup(s),gr.update(value=msg,visible=bool(msg)),
                     gr.update(visible=step==2 and has),gr.update(choices=choices,value=chosen),val,draft_preview,None,gr.update(value=snapshot(s),visible=step!=2),
                     gr.update(visible=step==3 and has),gr.update(choices=region_ids,value=selected_region),*region_box['bbox'],
                     gr.update(visible=step==4),gr.update(choices=box_ids,value=selected_box),
@@ -606,8 +617,9 @@ def create_app(options):
                     gr.update(value=source_mismatch_json),
                     gr.update(visible=step==7 and bool(source_mismatch_json))]
             rendered.append(gr.update(interactive=has_saved_image_records()))
+            # Preserve the image picker output slot before Save Progress.
             rendered.append(gr.update(value=s.get('image_path') if step == 1 else None))
-            rendered.append(gr.update(visible=has and step == 3, interactive=has and step == 3))
+            rendered.append(gr.update(visible=has and (step in (3, 4)), interactive=has and (step in (3, 4))))
             return rendered
 
         def run(ctx, action, payload=None, auto_detect=True):
@@ -920,6 +932,10 @@ def create_app(options):
                 try { return JSON.parse(draft || '{}')?.[path]?.value ?? ''; }
                 catch (_) { return ''; }
             }""",show_progress='hidden')
+        field_value.change(
+            fn=None, inputs=None, outputs=None, queue=False,
+            js="() => window.dispatchEvent(new Event('content-search-refresh'))",
+            show_progress='hidden')
         apply_field.click(
             fn=None,inputs=[field,field_value,content_bridge],
             outputs=[content_bridge,content_preview],queue=False,
@@ -1241,20 +1257,27 @@ def create_app(options):
         clear_loading_when_done(clear_mismatch.click(
             clear_source_mismatch,[session,selection_bridge],
             **dict(event_args,js=snapshot_board_state_js(1,deselect=True))))
-        def save_step3_draft(ctx, selection):
+        def save_progress_draft(ctx, selection):
             try:
-                ctx, _, _ = commit_frontend_boxes(ctx, selection)
+                step = ctx['active'].get('current_step', 3)
+                if step == 3:
+                    ctx, _, _ = commit_frontend_boxes(ctx, selection)
+                elif step == 4:
+                    ctx = commit_status_order(ctx, selection)
                 engine.save_draft(ctx['active'])
                 if ctx.get('active', {}).get('image_path'):
                     ctx['drafts'][ctx['active']['image_path']] = deepcopy(ctx['active'])
-                gr.Info('Đã lưu tiến độ vào .drafts!')
+                try:
+                    gr.Info(f'Saved Step {step} draft.')
+                except Exception:
+                    pass
                 return render(ctx)
             except Exception as exc:
-                log.exception('Failed to save Step 3 draft')
+                log.exception('Failed to save draft')
                 return render(ctx, WARNING + ' ' + html.escape(str(exc)))
 
         clear_loading_when_done(save_draft.click(
-            save_step3_draft, [session, selection_bridge],
+            save_progress_draft, [session, selection_bridge],
             **dict(event_args, js=snapshot_board_state_js(1, label_text='Saving progress…'))))
         for selector in (box_id,status_id):
             clear_loading_when_done(selector.input(lambda c,i:run(c,'select',dict(id=i)),[session,selector],**event_args))
@@ -1302,9 +1325,10 @@ def create_app(options):
                     ordered=calculate_spatial_order(boxes,ctx['active']['image_size'])
                     if set(ordered) != set(boxes) or len(ordered) != len(boxes):
                         raise ValueError('Sorter did not return every frontend box exactly once.')
-                    log.info('SORT: image=%s request_id=%s frontend count=%d sent IDs=%s returned IDs=%s',
+                    log.info('SORT: image=%s request_id=%s boxes=%d sorted=%d',
                              ctx['active'].get('image_path'),payload.get('sortRequestId'),
-                             len(boxes),list(boxes),ordered)
+                             len(boxes),len(ordered))
+                    log.debug('SORT: sent IDs=%s returned IDs=%s', list(boxes), ordered)
                     transient['selected_region_uids']=[
                         uid for uid in payload.get('selectedIds',[])
                         if uid in transient['regions']
@@ -1322,6 +1346,8 @@ def create_app(options):
         board.action(on_action,[session],outputs=outputs,concurrency_id='annotation-actions',
                      concurrency_limit=1,show_progress='hidden')
         app.load(fn=None, inputs=None, outputs=None, js=FONT_PRELOAD_JS,
+                 show_progress='hidden')
+        app.load(fn=None, inputs=None, outputs=None, js=CONTENT_SEARCH_JS,
                  show_progress='hidden')
     return app
 

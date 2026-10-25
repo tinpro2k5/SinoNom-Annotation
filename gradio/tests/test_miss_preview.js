@@ -51,7 +51,7 @@ const makeGroup = id => {
   group.rect = new Node(); group.label = new Node(); group.appendChild(group.label);
   return group;
 };
-let container = new Node(), canvas = new Node();
+let container = new Node(), canvas = new Node(), alignmentControls = null;
 let groups = ['1', '2', '3'].map(makeGroup);
 const tokens = [makeChip('a', '永'), makeChip('b', 'MISS'), makeChip('c', 'MISS')];
 tokens.forEach(chip => container.appendChild(chip));
@@ -66,6 +66,9 @@ const chipsFor = selector => {
 const element = {
   querySelector: selector => selector === '.order-chips' ? container
     : selector === '.annotation-canvas' ? canvas
+    : selector === '.alignment-actions' ? alignmentControls
+    : selector === '[data-alignment-feedback]' ? alignmentControls?.feedback
+    : selector === '[data-alignment-target]' ? alignmentControls?.target
     : selector.startsWith('[data-order-chip]') ? chipsFor(selector)[0] : null,
   querySelectorAll: selector => selector.startsWith('.annotation-canvas') ? groups
     : selector.includes('.tile-character') ? [] : chipsFor(selector),
@@ -196,3 +199,140 @@ container.insertBefore(container.children[1], container.children[0]);
 run('updateExcludedChips(alignmentContainer)');
 assert.equal(groups[0].querySelector('[data-miss-mark]'), repairedMark);
 console.log('PASS: live MISS overlays, duplicate tokens, cancel/drop preserve flags and geometry, delayed/replaced DOM, exclusions and Review isolation');
+
+// Number-based insert/swap run through the real preview, selection and bridge.
+alignmentControls = {
+  label: {}, target: {}, feedback: {}, buttons: [{}, {}],
+  querySelector(selector) {
+    return selector === '[data-alignment-selected]' ? this.label
+      : selector === '[data-alignment-target]' ? this.target : null;
+  },
+  querySelectorAll() {return this.buttons;},
+};
+let bridge;
+Object.assign(context, {
+  activeBoxId: null, activeTokenId: null, selectedIds: new Set(), pending: false,
+  isDirty: false, syncingStatusControl: false,
+  root: {querySelector: () => null, querySelectorAll: () => []},
+  updateValidationSummary: () => {},
+  serializeLocalBoxes: () => JSON.parse(JSON.stringify(boxes)),
+  setInputValue(selector, value) {if (selector === '#selection-bridge') bridge = JSON.parse(value);},
+});
+vm.runInContext(extract('const syncExternalControls =', 'const renderLocalStatus =')
+  + extract('const renderSelection =', 'const updateCanvasLabels ='), context);
+context.props.value.step = 4;
+run('initializeAlignmentStateFromDOM()');
+assert.equal(alignmentControls.buttons[0].disabled, true, 'Choose a token before reordering');
+let coordsBefore = JSON.stringify(Object.values(boxes).map(box => box.bbox));
+const idsBefore = container.children.map(chip => chip.dataset.tokenId).sort();
+function select(id) {
+  context.selectedChip = container.children.find(chip => chip.dataset.tokenId === id);
+  run('selectAlignmentToken(selectedChip)');
+}
+function action(kind, position) {
+  context.actionKind = kind; context.actionPosition = position;
+  return run('applyAlignmentPositionAction(actionKind, actionPosition)');
+}
+function assertOrder(expected) {
+  assert.deepEqual(container.children.map(chip => chip.dataset.tokenId), expected);
+  assert.deepEqual(bridge.tokenOrder, expected);
+  assert.deepEqual(bridge.textSequence, container.children.map(chip => chip.dataset.character));
+  assert.deepEqual(container.children.map(chip => chip.dataset.tokenId).sort(), idsBefore);
+  assert.equal(JSON.stringify(Object.values(boxes).map(box => box.bbox)), coordsBefore);
+}
+// Start: d=MISS, e=永, f=寺, g=MISS (excluded).
+select('e');
+assert.equal(alignmentControls.buttons[0].disabled, false);
+assert.equal(action('insert', '3'), true);
+assertOrder(['d', 'f', 'e', 'g']);
+assert.equal(context.activeTokenId, 'e');
+assert.equal(context.activeBoxId, '3');
+assert.equal(container.children[2].classList.contains('selected-chip'), true);
+assert.equal(context.isDirty, true);
+assert.equal(action('insert', '1'), true);
+assertOrder(['e', 'd', 'f', 'g']); check([2]);
+// Only the two endpoints change when swapping, including excluded duplicate MISS.
+assert.equal(action('swap', '4'), true);
+assertOrder(['g', 'd', 'f', 'e']); check([1, 2]);
+assert.equal(context.activeTokenId, 'e');
+assert.equal(context.activeBoxId, null, 'Excluded token remains selectable without a box');
+assert.match(alignmentControls.label.textContent, /4/);
+assert.equal(action('swap', '1'), true);
+assertOrder(['e', 'd', 'f', 'g']);
+// Duplicate characters retain separate token identity even when text looks equal.
+select('d');
+assert.equal(action('swap', '4'), true);
+assertOrder(['e', 'g', 'f', 'd']); check([2]);
+assert.equal(context.activeTokenId, 'd');
+assert.equal(context.activeBoxId, null);
+// Boundary moves and same-position no-op.
+assert.equal(action('insert', '1'), true);
+assertOrder(['d', 'e', 'g', 'f']); check([1, 3]);
+context.isDirty = false;
+assert.equal(action('insert', '1'), false);
+assert.equal(context.isDirty, false);
+// Reject invalid positions, missing selection, pending/dragging and stale DOM.
+const unchanged = JSON.stringify(container.children.map(chip => chip.dataset.tokenId));
+for (const position of ['', '0', '-1', '5', '2.5', '2e0', 'abc', 'Infinity']) {
+  assert.equal(action('insert', position), false);
+  assert.equal(JSON.stringify(container.children.map(chip => chip.dataset.tokenId)), unchanged);
+}
+context.activeTokenId = null;
+assert.equal(action('swap', '2'), false);
+select('d');
+for (const field of ['pending', 'orderDrag']) {
+  context[field] = true;
+  assert.equal(action('insert', '2'), false);
+  context[field] = field === 'orderDrag' ? null : false;
+}
+context.props.value.alignmentTokenIds.push('not-rendered');
+assert.equal(action('swap', '2'), false);
+context.props.value.alignmentTokenIds.pop();
+context.props.value.step = 7;
+assert.equal(action('insert', '2'), false);
+assert.equal(JSON.stringify(container.children.map(chip => chip.dataset.tokenId)), unchanged);
+// Exercise the actual button/card click handler and selecting a box on the image.
+context.props.value.step = 4;
+context.suppressAlignmentClick = false;
+let clickHandler;
+context.root.addEventListener = (type, handler) => {if (type === 'click') clickHandler = handler;};
+vm.runInContext(extract("root.addEventListener('click', event =>", "window.addEventListener('keydown', event =>"), context);
+const chosen = container.children.find(chip => chip.dataset.tokenId === 'e');
+chosen.closest = selector => selector === '.order-chips' ? container : null;
+let prevented = false;
+clickHandler({target: {closest: selector => selector === '[data-order-chip]' ? chosen : null},
+  preventDefault() {prevented = true;}});
+assert.equal(prevented, true);
+assert.equal(context.activeTokenId, 'e');
+alignmentControls.target.value = '4';
+clickHandler({target: {closest: selector => selector === '[data-alignment-action]' ? {dataset:{alignmentAction:'swap'}} : null},
+  preventDefault() {}});
+assertOrder(['d', 'f', 'g', 'e']);
+vm.runInContext(extract('const setSelection =', "root.addEventListener('deselect-regions'"), context);
+run("setSelection(['3'], '3')");
+assert.equal(context.activeTokenId, 'g');
+assert.equal(container.children[2].classList.contains('selected-chip'), true);
+run('setSelection([], null)');
+assert.equal(context.activeTokenId, null);
+assert.equal(alignmentControls.buttons[0].disabled, true);
+// A normal four-character draft, with duplicate glyphs, can be sent to Python.
+groups.push(makeGroup('4'));
+boxes['4'] = {bbox:[90,10,110,30],order:4,status:'intact',unknown:false,
+  unavailable_font:false,expert_prediction:false,suspicious:false};
+coordsBefore = JSON.stringify(Object.values(boxes).map(box => box.bbox));
+context.props.value.spatialBoxOrder = [1,2,3,4];
+context.props.value.alignmentTokenIds = ['d','e','f','g'];
+container.dataset.excludedCount = '0';
+const normalCharacters = {d:'永',e:'永',f:'寺',g:'碑'};
+container.children.forEach(chip => {chip.dataset.character = normalCharacters[chip.dataset.tokenId];});
+run("arrangeOrder(alignmentContainer, ['d','e','f','g']); initializeAlignmentStateFromDOM()");
+select('e');
+assert.equal(action('swap', '4'), true);
+assert.equal(action('insert', '2'), true);
+assertOrder(['d','e','g','f']);
+assert.deepEqual(bridge.textSequence, ['永','永','碑','寺']);
+console.log('PASS: insert/swap positions, duplicate identity, MISS/exclusions, selection, bridge data, coordinates and invalid/stale actions');
+if (process.argv.includes('--emit-alignment-payload')) {
+  // Keep Unicode intact when piping through Windows PowerShell to Python.
+  console.log(Buffer.from(JSON.stringify(bridge), 'utf8').toString('base64'));
+}

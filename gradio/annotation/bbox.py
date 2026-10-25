@@ -90,7 +90,8 @@ def sync_draft_boxes(state, payload, materialize_alignment=True):
     if not isinstance(boxes, dict):
         return
 
-    log.info('APPLY: frontend/Python received count=%d IDs=%s', len(boxes), list(boxes))
+    log.info('APPLY: received %d boxes from browser', len(boxes))
+    log.debug('APPLY: received region IDs=%s', list(boxes))
 
     previous_count = len(state['regions'])
     update_bboxes(state, boxes, payload.get('active'), payload.get('selected'))
@@ -147,8 +148,8 @@ def sync_draft_boxes(state, payload, materialize_alignment=True):
                          or source_mismatch_confirmed(state))):
                 from .state import initialize_alignment
                 initialize_alignment(state, ordered_uids=ordered_uids)
-    log.info('APPLY: persisted draft count=%d IDs=%s',
-             len(state['regions']), list(state['regions']))
+    log.info('APPLY: synchronized %d boxes into session state', len(state['regions']))
+    log.debug('APPLY: synchronized region IDs=%s', list(state['regions']))
 
 
 def delete_bbox(state, region_uid):

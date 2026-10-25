@@ -218,7 +218,7 @@
 
 .status-order-board .order-editor {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   align-content: stretch;
   align-self: stretch;
   height: auto;
@@ -226,6 +226,16 @@
   max-height: none;
   overflow: hidden;
 }
+.alignment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; }
+.alignment-actions [data-alignment-selected] { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; font-family: var(--han-nom-font), Arial, sans-serif; font-size: 14px; }
+.alignment-actions label { display: flex; align-items: center; gap: 8px; color: var(--color-muted, #a1a1aa); font: 12px Arial, sans-serif; }
+.alignment-actions input { width: 84px; padding: 6px 8px; border: 1px solid var(--color-border, #303237); border-radius: 6px; background: var(--color-page, #0b0d0f); color: var(--color-text, #f4f4f5); }
+.alignment-action-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.alignment-action-buttons button { padding: 6px 10px; border: 1px solid var(--color-border, #303237); border-radius: 6px; background: var(--color-panel, #17191c); color: var(--color-text, #f4f4f5); font: 12px Arial, sans-serif; cursor: pointer; }
+.alignment-action-buttons button:hover:not(:disabled) { border-color: var(--color-accent, #ff7a1a); }
+.alignment-action-buttons button:disabled { opacity: .45; cursor: default; }
+.alignment-actions [data-alignment-feedback] { flex-basis: 100%; margin: 0; color: var(--color-muted, #a1a1aa); font: 12px/1.5 Arial, sans-serif; }
+.alignment-actions [data-alignment-feedback]:empty { display: none; }
 .status-order-board .order-editor,
 .status-order-board .review-editor {
   grid-column: 1;

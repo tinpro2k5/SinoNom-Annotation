@@ -22,7 +22,7 @@ const group = new Node();group.rect=new Node();group.label=new Node();group.data
 Object.entries({x:10,y:20,width:30,height:40}).forEach(([k,v])=>group.rect.setAttribute(k,v));
 const chip=new Node();chip.dataset={assignedBoxId:'1',character:'永'};const box={bbox:[10,20,40,60],status:'intact',unknown:false,unavailable_font:false,expert_prediction:false,suspicious:false};
 const context = {localBoxes:{'1':box},groupFor:()=>group,props:{value:{step:4}},
-  selectedIds:new Set(['1']), annotationColor:'#22d3ee', applyAnnotationColor:()=>{}, element:{querySelector:selector=>selector==='.status-legend'?null:chip,querySelectorAll:selector=>selector.startsWith('.annotation-canvas')?[group]:selector==='[data-order-chip]'?[]:[chip]}, document:{createElementNS:()=>new Node()},
+  selectedIds:new Set(['1']), annotationColor:'#22d3ee', applyAnnotationColor:()=>{}, element:{querySelector:selector=>['.status-legend','.alignment-actions','.order-chips'].includes(selector)?null:chip,querySelectorAll:selector=>selector.startsWith('.annotation-canvas')?[group]:selector==='[data-order-chip]'?[]:[chip]}, document:{createElementNS:()=>new Node()},
   activeBoxId:'1',syncExternalControls:()=>{},assert};
 vm.createContext(context);
 vm.runInContext(extract('const statusColor =', 'const applyAnnotationColor =') +

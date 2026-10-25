@@ -101,3 +101,37 @@ def display_step(step):
     if step == 7:
         return 6
     return 4
+
+
+def load_notification_markup(state):
+    step = state.get('current_step')
+    if step not in (3, 4):
+        return ''
+    info = state.get('load_source_info')
+    if not info:
+        return ''
+    source = html.escape(str(info.get('source', 'draft')))
+    source_label = html.escape(str(info.get('source_label', 'Bản nháp (Draft)')))
+    file_name = html.escape(str(info.get('file_name', '')))
+    mtime_str = html.escape(str(info.get('mtime_str', '')))
+    loaded_step = info.get('step', step)
+    toast_key = f"{state.get('image', '')}:{file_name}:{info.get('mtime', '')}"
+
+    icon = '💾' if source == 'draft' else '📄'
+    return f'''<aside id="load-source-toast" class="load-source-toast toast-{source}" data-toast-key="{html.escape(toast_key)}" role="status" aria-live="polite">
+      <img src="data:," style="display:none" alt="" onerror="const t=this.closest('.load-source-toast');if(t&&window.__dismissedLoadToastKey===t.dataset.toastKey)t.remove();">
+      <div class="toast-header-row">
+        <span class="toast-icon" aria-hidden="true">{icon}</span>
+        <span class="toast-title">Đã nạp {source_label}</span>
+        <span class="toast-step-badge">Step {loaded_step}</span>
+        <button type="button" class="toast-close-btn" onclick="const t=this.closest('.load-source-toast');if(t){{window.__dismissedLoadToastKey=t.dataset.toastKey;t.classList.add('is-dismissing');setTimeout(()=>t.remove(),250);}}" title="Đóng thông báo" aria-label="Đóng thông báo">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"></line><line x1="12" y1="2" x2="2" y2="12"></line></svg>
+        </button>
+      </div>
+      <div class="toast-details">
+        <span class="toast-detail-label">Tệp tin:</span>
+        <span class="toast-detail-val toast-filename" title="{file_name}">{file_name}</span>
+        <span class="toast-detail-label">Ngày sửa đổi:</span>
+        <span class="toast-detail-val toast-timestamp">{mtime_str}</span>
+      </div>
+    </aside>'''

@@ -19,7 +19,7 @@ def new_state():
                 revision=0, current_step=1,
                 detection_loaded=False, crop=None, resized_image_size=None,
                 source_mismatch=None,
-                crop_saved=False, saved=False,
+                crop_saved=False, saved=False, load_source_info=None,
                 workflow=dict(content_verified=False, bbox_valid=False,
                               alignment_valid=False, status_valid=False, reading_order_valid=False))
 

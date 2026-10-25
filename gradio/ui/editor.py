@@ -169,22 +169,22 @@ def snapshot(s):
             label = html.escape(public_id) if public_id else ''
             label_markup = ''
             if label:
-                num_x = x1 + 3 * unit
-                num_y = y1 + 3 * unit
-                num_size = max(9 * unit, min(bw, bh) * 0.22)
+                num_x = x1 + 0.4 * unit
+                num_y = y1 + 0.4 * unit
+                num_size = max(6 * unit, min(bw, bh) * 0.14)
                 label_markup = f'<text data-box-order-label="1" fill="{stroke_color}" font-family="sans-serif" pointer-events="none" paint-order="stroke" stroke="#17191c" stroke-width="{stroke_width}"><tspan class="box-order-num" x="{num_x}" y="{num_y}" font-size="{num_size}" font-weight="700" text-anchor="start" dominant-baseline="hanging">{label}</tspan></text>'
         else:
             char = s.get('annotations', {}).get(str(key), '')
             label = html.escape(key + (' ' + char if char else '')) if public_box else ''
             label_markup = ''
             if public_box and (key or char):
-                num_x = x1 + 3 * unit
-                num_y = y1 + 3 * unit
-                num_size = max(9 * unit, min(bw, bh) * 0.22)
-                char_size = max(12 * unit, min(bw, bh) * 0.42)
+                num_x = x1 + 0.4 * unit
+                num_y = y1 + 0.4 * unit
+                num_size = max(6 * unit, min(bw, bh) * 0.14)
+                char_size = max(9 * unit, min(bw, bh) * 0.30)
                 max_w = canvas_w if step == 7 else draw_w
                 is_near_right = (x2 + char_size * 1.5) > max_w
-                char_x = x1 - 4 * unit if is_near_right else x2 + 4 * unit
+                char_x = x1 - 0.4 * unit if is_near_right else x2 + 0.4 * unit
                 char_anchor = 'end' if is_near_right else 'start'
                 char_y = (y1 + y2) / 2
                 escaped_key = html.escape(str(key))
@@ -258,6 +258,15 @@ def snapshot(s):
                 </button>
 </div>
                 <p class="order-help">{help_text}</p>
+                <div class="alignment-actions" aria-label="Chỉnh vị trí ký tự">
+                    <p data-alignment-selected="1" aria-live="polite">Chọn một thẻ chữ hoặc box trên ảnh.</p>
+                    <label>Vị trí đích <input type="number" min="1" max="{len(values)}" step="1" data-alignment-target="1" aria-label="Vị trí đích" placeholder="1–{len(values)}" disabled/></label>
+                    <div class="alignment-action-buttons">
+                        <button type="button" data-alignment-action="insert" title="Đưa chữ đến vị trí đích, dịch các chữ ở giữa" disabled>Chèn vào</button>
+                        <button type="button" data-alignment-action="swap" title="Đổi chỗ chữ đang chọn với chữ ở vị trí đích" disabled>Đổi chỗ</button>
+                    </div>
+                    <p data-alignment-feedback="1" role="status" aria-live="polite"></p>
+                </div>
                 <div class="order-chips" data-excluded-count="{excluded_count}" data-alignment-ready="false" aria-busy="true" role="list" aria-label="Sortable character assignment">{''.join(chips)}</div>
                 <p class="order-sync-note" aria-live="polite">Order changes stay local until you apply them or continue.</p></section>'''
         if step==7:
