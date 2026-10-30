@@ -852,6 +852,8 @@ def create_app(options):
                       issue_type=None, mismatch_note_value='', selection='{}',
                       status_value='intact', x1_value=None, y1_value=None,
                       x2_value=None, y2_value=None, crop_coordinates=None):
+            if not ctx.get('active', {}).get('image') or ctx.get('active', {}).get('current_step', 1) <= 1:
+                return render(ctx)
             if ctx['active']['current_step'] == 2:
                 try:
                     ctx=commit_frontend_content(ctx,content_draft)

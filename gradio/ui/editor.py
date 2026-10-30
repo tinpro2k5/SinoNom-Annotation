@@ -124,7 +124,8 @@ def snapshot(s):
     board_class = ' status-order-board review-board' if step == 7 else ' status-order-board' if step == 4 else ''
     markup=f'''<div class="workbench-board{board_class}"><div class="workspace-toolbar">
         <div class="workspace-context"><span class="file-icon">{DOCUMENT}</span><strong>{filename}</strong><span class="dimensions">{dimensions}</span></div>
-        <div class="toolbar-tools"><button type="button" class="tool-btn-numbers active" data-toggle-numbers="1" title="Bật/Tắt số thứ tự (Toggle box numbers)"># 123</button>
+        <div class="toolbar-tools"><button type="button" class="tool-btn-column" data-toggle-column="1" title="Chỉ hiện cột đang chọn (Toggle current column only)">❚ Cột</button>
+        <button type="button" class="tool-btn-numbers active" data-toggle-numbers="1" title="Bật/Tắt số thứ tự (Toggle box numbers)"># 123</button>
         <span class="zoom-label" aria-live="polite">100%</span>
         <button type="button" data-zoom="out" aria-label="Zoom out"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
         <button type="button" data-zoom="in" aria-label="Zoom in"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button></div></div>

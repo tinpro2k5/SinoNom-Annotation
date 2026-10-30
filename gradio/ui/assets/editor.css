@@ -120,29 +120,50 @@
   display: none !important;
 }
 
-/* Toolbar button for toggling numbers */
-.tool-btn-numbers {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: var(--radius-sm, 4px);
-  border: 1px solid var(--color-border, #3a3f4a);
-  background: var(--color-panel, #202227);
-  color: var(--color-muted, #9ca3af);
-  cursor: pointer;
-  transition: all 0.15s ease;
+/* Hide boxes not in selected column when column filter is active */
+.annotation-canvas.column-filter-active [data-box-id].not-in-column {
+  display: none !important;
 }
-.tool-btn-numbers:hover {
-  background: var(--color-panel-hover, #2b2e35);
-  color: var(--color-text, #ffffff);
+
+/* Toolbar button for toggling numbers and column view */
+.toolbar-tools button.tool-btn-numbers,
+.toolbar-tools button.tool-btn-column {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 48px !important;
+  height: 32px !important;
+  padding: 0 8px !important;
+  white-space: nowrap !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  border-radius: var(--radius-sm, 4px) !important;
+  border: 1px solid var(--color-border, #3a3f4a) !important;
+  background: var(--color-panel, #202227) !important;
+  color: var(--color-muted, #9ca3af) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  transition: all 0.15s ease !important;
 }
-.tool-btn-numbers.active {
-  background: var(--color-accent, #ff7a1a);
-  border-color: var(--color-accent, #ff7a1a);
-  color: #ffffff;
+.toolbar-tools button.tool-btn-numbers:hover,
+.toolbar-tools button.tool-btn-column:hover {
+  background: var(--color-panel-hover, #2b2e35) !important;
+  border-color: #4a4d53 !important;
+  color: var(--color-text, #ffffff) !important;
+}
+.toolbar-tools button.tool-btn-numbers.active,
+.toolbar-tools button.tool-btn-column.active {
+  background: var(--color-accent, #ff7a1a) !important;
+  border-color: var(--color-accent, #ff7a1a) !important;
+  color: #ffffff !important;
+}
+.toolbar-tools button.tool-btn-numbers.active:hover,
+.toolbar-tools button.tool-btn-column.active:hover {
+  background: #e66910 !important;
+  border-color: #e66910 !important;
+  color: #ffffff !important;
 }
 
 .annotation-canvas [data-box-id] { cursor: pointer; }
